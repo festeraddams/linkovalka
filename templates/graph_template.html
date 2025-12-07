@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>SEO Граф (Interactive Pro)</title>
+    <script src="assets/echarts.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; height: 100%; overflow: hidden;
+            background-color: #2C2C2E;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        #chart-container { width: 100%; height: 100%; }
+
+        /* Панель управления */
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(40, 40, 45, 0.95);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 12px;
+            color: #fff;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 220px;
+        }
+
+        .controls h3 { margin: 0 0 5px 0; font-size: 12px; color: #6A9EFF; text-transform: uppercase; letter-spacing: 1px; }
+
+        .btn-group { display: flex; flex-direction: column; gap: 6px; }
+
+        button.layout-btn {
+            background: #3A3A3C;
+            color: #ccc;
+            border: 1px solid #555;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            text-align: left;
+            transition: all 0.3s ease;
+        }
+
+        button.layout-btn:hover { background: #4A4A4C; border-color: #888; color: #fff; }
+        button.layout-btn.active { background: #3B82F6; color: #fff; border-color: #3B82F6; font-weight: 600; }
+
+        .checkbox-row { display: flex; align-items: center; gap: 10px; font-size: 13px; cursor: pointer; user-select: none; }
+        .checkbox-row input { cursor: pointer; accent-color: #3B82F6; }
+
+        .stats-bar {
+            margin-top: 5px;
+            padding-top: 10px;
+            border-top: 1px solid #444;
+            font-size: 11px;
+            color: #888;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Стили для кнопок внутри тултипа */
+        .tooltip-btn {
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+            border: 1px solid transparent;
+        }
+        .tooltip-btn:hover {
+            border-color: rgba(255,255,255,0.3);
+            filter: brightness(1.2);
+        }
+    </style>
+</head>
+<body>
+
+<div class="controls">
+    <h3>Вид Графа</h3>
+    <div class="btn-group">
+        <button onclick="setForceLayout()" id="btn-force" class="layout-btn active">🕸 Паутина (Разряженная)</button>
+        <button onclick="setCircularLayout()" id="btn-circular" class="layout-btn">⭕ Кольцо (Circular)</button>
+    </div>
+
+    <h3>Фильтры</h3>
+    <label class="checkbox-row">
+        <input type="checkbox" id="showTablets" checked onchange="updateData()">
+        Показывать Таблетки
+    </label>
+
+    <div class="stats-bar">
+        <span>Узлов: <b id="stat-nodes" style="color:#eee">0</b></span>
+        <span>Связей: <b id="stat-edges" style="color:#eee">0</b></span>
+    </div>
+</div>
+
+<div id="chart-container"></div>
+
+<script>
+    // --- ДАННЫЕ ---
+    const rawNodes = (typeof NODES_DATA !== 'undefined') ? NODES_DATA : [];
+    const rawEdges = (typeof EDGES_DATA !== 'undefined') ? EDGES_DATA : [];
+
+    // Глобальное состояние для подсветки
+    let highlightState = {
+        active: false,
+        nodeId: null,
+        direction: null // 'in' или 'out'
+    };
+
+    // --- ПОДГОТОВКА ---
+    const nodeStats = {};
+    const nodeMap = {}; // Быстрый доступ по ID
+
+    rawNodes.forEach(n => {
+        nodeStats[n.id] = { in: 0, out: 0 };
+        nodeMap[n.id] = n.label;
+    });
+
+    rawEdges.forEach(e => {
+        if (nodeStats[e.to]) nodeStats[e.to].in++;
+        if (nodeStats[e.from]) nodeStats[e.from].out++;
+    });
+
+    // Формируем данные ECharts
+    const allNodes = rawNodes.map(n => {
+        const s = nodeStats[n.id];
+        const baseSize = n.group === 'tablet' ? 35 : 15;
+        const size = Math.min(baseSize + (s.in * 2), 70);
+
+        return {
+            id: String(n.id),
+            name: n.label,
+            value: s.in + s.out,
+            symbolSize: size,
+            // --- ВОТ ЭТА СТРОКА ДОБАВЛЕНА ---
+            draggable: true,
+            // --------------------------------
+            itemStyle: {
+                color: n.group === 'tablet' ? '#FFBF00' : '#3B82F6',
+                borderColor: '#fff',
+                borderWidth: 1.5,
+                shadowBlur: 10,
+                shadowColor: 'rgba(0,0,0,0.5)'
+            },
+            // Данные для логики
+            url: n.url,
+            statIn: s.in,
+            statOut: s.out,
+            isTablet: n.group === 'tablet',
+            label: {
+                show: true,
+                color: '#eee',
+                fontSize: 11,
+                position: 'right'
+            }
+        };
+    });
+
+    const allLinks = rawEdges.map(e => ({
+        source: String(e.from),
+        target: String(e.to),
+        lineStyle: {
+            color: '#888',
+            width: 2, // Сделал чуть толще, чтобы легче кликать
+            curveness: 0.1,
+            opacity: 0.4
+        }
+    }));
+
+    // --- ИНИЦИАЛИЗАЦИЯ ---
+    const myChart = echarts.init(document.getElementById('chart-container'));
+    let currentLayout = 'force';
+
+    // Основная функция настроек
+    function getOption(nodes, links) {
+        return {
+            backgroundColor: '#2C2C2E',
+
+            tooltip: {
+                trigger: 'item',
+                triggerOn: 'click',
+                enterable: true,
+                confine: true,
+                padding: 0,
+                backgroundColor: 'transparent',
+                borderWidth: 0,
+                formatter: function (params) {
+                    // === ПОДСКАЗКА ДЛЯ УЗЛА ===
+                    if (params.dataType === 'node') {
+                        const d = params.data;
+                        const typeLabel = d.isTablet ? "💊 Таблетка" : "📄 Страница";
+                        const urlText = d.url || '#';
+
+                        return `
+                            <div style="
+                                background: rgba(40, 40, 45, 0.98);
+                                border: 1px solid #666;
+                                border-radius: 8px;
+                                padding: 12px;
+                                max-width: 320px;
+                                box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+                                font-family: 'Segoe UI', sans-serif;
+                            ">
+                                <div style="color: #fff; font-weight: bold; font-size: 14px; margin-bottom: 6px; border-bottom: 1px solid #555; padding-bottom: 6px;">
+                                    ${d.name}
+                                </div>
+                                <div style="font-size: 11px; color: #aaa; margin-bottom: 10px;">${typeLabel}</div>
+
+                                <div style="font-size: 12px; color: #89b4fa; word-break: break-all; margin-bottom: 12px; background: rgba(0,0,0,0.3); padding: 6px; border-radius: 4px;">
+                                    <a href="${urlText}" target="_blank" style="color: #89b4fa; text-decoration: none; border-bottom: 1px dashed #89b4fa;">
+                                        ${urlText} 🔗
+                                    </a>
+                                </div>
+
+                                <div style="display: flex; gap: 10px;">
+                                    <div class="tooltip-btn" onclick="highlightLinks('${d.id}', 'in')" style="flex:1; background: rgba(74, 222, 128, 0.15); color: #4ade80; text-align:center;">
+                                        <div style="font-size:10px; opacity:0.8">ВХОДЯЩИЕ</div>
+                                        <div style="font-size:14px; font-weight:bold">↘ ${d.statIn}</div>
+                                    </div>
+                                    <div class="tooltip-btn" onclick="highlightLinks('${d.id}', 'out')" style="flex:1; background: rgba(244, 114, 182, 0.15); color: #f472b6; text-align:center;">
+                                        <div style="font-size:10px; opacity:0.8">ИСХОДЯЩИЕ</div>
+                                        <div style="font-size:14px; font-weight:bold">↗ ${d.statOut}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // === ПОДСКАЗКА ДЛЯ СВЯЗИ (ПО КЛИКУ) ===
+                    if (params.dataType === 'edge') {
+                        const srcName = params.data.sourceName || nodeMap[params.data.source] || params.data.source;
+                        const tgtName = params.data.targetName || nodeMap[params.data.target] || params.data.target;
+
+                        return `
+                            <div style="background: rgba(30,30,30,0.95); padding: 10px; border-radius: 6px; border: 1px solid #777; color: #fff;">
+                                <div style="font-size: 11px; color: #aaa; margin-bottom: 5px;">СВЯЗЬ</div>
+                                <div style="color: #89b4fa; font-weight: bold;">${srcName}</div>
+                                <div style="text-align: center; color: #aaa; margin: 2px 0;">⬇ ссылается на ⬇</div>
+                                <div style="color: #FFBF00; font-weight: bold;">${tgtName}</div>
+                            </div>
+                        `;
+                    }
+                    return null;
+                }
+            },
+
+            series: [
+                {
+                    type: 'graph',
+                    layout: currentLayout,
+                    data: nodes,
+                    links: links,
+                    roam: true,
+                    zoom: 0.6, // Чуть дальше, чтобы видеть всю "кучу"
+
+                    label: { show: true },
+
+                    // Стрелки
+                    edgeSymbol: ['none', 'arrow'],
+                    edgeSymbolSize: [0, 8],
+
+                    // ФИЗИКА (Сделал сильное отталкивание)
+                    force: {
+                        repulsion: 200,      // Очень сильное отталкивание (растаскивает кучу)
+                        gravity: 0.01,        // Слабая гравитация (не стягивает в точку)
+                        edgeLength: [300, 800], // Длинные связи
+                        layoutAnimation: true,
+                        friction: 0.6         // Чтобы не "дрожало" вечно
+                    },
+
+                    // Круг
+                    circular: { rotateLabel: true },
+
+                    // Базовая подсветка (если мы не в спец. режиме)
+                    emphasis: {
+                        focus: 'adjacency',
+                        lineStyle: { width: 4 }
+                    }
+                }
+            ]
+        };
+    }
+
+    // 5. ЛОГИКА ОБНОВЛЕНИЯ
+    function updateData() {
+        const showTablets = document.getElementById('showTablets').checked;
+
+        // Фильтруем
+        const filteredNodes = allNodes.filter(n => (!showTablets && n.isTablet) ? false : true);
+        const activeIds = new Set(filteredNodes.map(n => n.id));
+        const filteredLinks = allLinks.filter(l => activeIds.has(l.source) && activeIds.has(l.target));
+
+        document.getElementById('stat-nodes').innerText = filteredNodes.length;
+        document.getElementById('stat-edges').innerText = filteredLinks.length;
+
+        // Сброс зума/позиции при смене данных не желателен, используем notMerge: false
+        // Но если меняем набор узлов, лучше перерисовать
+        myChart.setOption(getOption(filteredNodes, filteredLinks), { notMerge: false });
+    }
+
+    // 6. ФУНКЦИЯ СПЕЦ-ПОДСВЕТКИ (IN/OUT)
+    window.highlightLinks = function(centerId, direction) {
+        // Сбрасываем предыдущее выделение, если есть
+        if (highlightState.active && highlightState.nodeId === centerId && highlightState.direction === direction) {
+            // Кликнули второй раз - сброс
+            resetHighlight();
+            return;
+        }
+
+        highlightState = { active: true, nodeId: centerId, direction: direction };
+
+        const showTablets = document.getElementById('showTablets').checked;
+
+        // Получаем текущие узлы и связи из модели
+        // Мы должны пройтись по всем и выставить opacity
+        const newNodes = allNodes.filter(n => (!showTablets && n.isTablet) ? false : true).map(n => {
+            // Клонируем, чтобы не портить оригинал навсегда
+            const node = JSON.parse(JSON.stringify(n));
+
+            // Центр всегда яркий
+            if (n.id === centerId) {
+                node.itemStyle.opacity = 1;
+                return node;
+            }
+
+            // Проверяем связь
+            let isConnected = false;
+
+            if (direction === 'in') {
+                // Ищем, ссылается ли этот n на centerId
+                isConnected = allLinks.some(l => l.source === n.id && l.target === centerId);
+            } else {
+                // Ищем, ссылается ли centerId на этот n
+                isConnected = allLinks.some(l => l.source === centerId && l.target === n.id);
+            }
+
+            // Если связан - ярко, если нет - прозрачно
+            node.itemStyle.opacity = isConnected ? 1 : 0.1;
+            node.label.show = isConnected; // Показываем имена только связанных
+
+            return node;
+        });
+
+        const newLinks = allLinks.map(l => {
+            const link = JSON.parse(JSON.stringify(l));
+            let isRelevant = false;
+
+            if (direction === 'in') {
+                isRelevant = (l.target === centerId); // Входящая в центр
+            } else {
+                isRelevant = (l.source === centerId); // Исходящая из центра
+            }
+
+            if (isRelevant) {
+                link.lineStyle.opacity = 1;
+                link.lineStyle.width = 2;
+                link.lineStyle.color = direction === 'in' ? '#4ade80' : '#f472b6'; // Зеленый или Розовый
+                link.z = 10; // Поверх остальных
+            } else {
+                link.lineStyle.opacity = 0.05; // Почти невидимы
+            }
+            return link;
+        });
+
+        // Обновляем граф с новыми стилями
+        myChart.setOption({
+            series: [{
+                data: newNodes,
+                links: newLinks,
+                // Отключаем стандартный emphasis, чтобы не мешал нашему режиму
+                emphasis: { disabled: true }
+            }]
+        });
+    };
+
+    // Сброс подсветки (клик в пустоту)
+    function resetHighlight() {
+        if (!highlightState.active) return;
+        highlightState = { active: false, nodeId: null, direction: null };
+        updateData(); // Просто перерисовываем дефолтное состояние
+    }
+
+    // Клик по пустому месту
+    myChart.getZr().on('click', function (event) {
+        if (!event.target) {
+            resetHighlight();
+            // Также скрываем тултип
+            myChart.dispatchAction({ type: 'hideTip' });
+        }
+    });
+
+    // Переключатели
+    window.setForceLayout = function() {
+        currentLayout = 'force';
+        document.getElementById('btn-force').classList.add('active');
+        document.getElementById('btn-circular').classList.remove('active');
+        updateData();
+    };
+
+    window.setCircularLayout = function() {
+        currentLayout = 'circular';
+        document.getElementById('btn-circular').classList.add('active');
+        document.getElementById('btn-force').classList.remove('active');
+        updateData();
+    };
+
+    window.addEventListener('resize', () => myChart.resize());
+
+    // Старт
+    updateData();
+
+</script>
+</body>
+</html>
