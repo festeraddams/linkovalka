@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from graph_dialog import GraphDialog
-from stage2 import SecondStageLinkDialog
+# from stage2 import SecondStageLinkDialog  # Moved to seo_cluster_dialog
 from matrix_splash import MatrixSplashScreen, SpinnerOverlay
 from seo_cluster_dialog import SEOClusterDialog
 from pbn_analyzer import PbnAnalyzerDialog
@@ -190,20 +190,6 @@ class GiveMeUrlsWorker(QThread):
             self.error.emit(str(e))
 
 
-class AnalyzePagesWorker(QThread):
-    finished = pyqtSignal(dict)
-    error = pyqtSignal(str)
-
-    def __init__(self, generator):
-        super().__init__()
-        self.generator = generator
-
-    def run(self):
-        try:
-            res = self.generator.analyze_pages()
-            self.finished.emit(res)
-        except Exception as e:
-            self.error.emit(str(e))
 
 class ReplaceTxtWorker(QThread):
     error = pyqtSignal(str)
@@ -521,238 +507,16 @@ class HelpDialog(QDialog):
         self.setLayout(layout)
 
 
-###############################################################################
-# 1-й этап: АНКОРЫ
-###############################################################################
-class AnchorDialog(QDialog):
-    def __init__(self, kw_set, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Настройка анкоров (1-й этап)")
-        self.setMinimumWidth(600)
-        layout = QVBoxLayout()
-        self.keyword_list = QListWidget()
-        self.keyword_list.addItems(sorted(kw_set))
-        layout.addWidget(QLabel("Выберите ключевое слово для редактирования анкоров:"))
-        layout.addWidget(self.keyword_list)
 
-        add_layout = QHBoxLayout()
-        self.anchor_input = QLineEdit()
-        self.add_anchor_btn = QPushButton("Добавить анкор")
-        add_layout.addWidget(self.anchor_input)
-        add_layout.addWidget(self.add_anchor_btn)
-        layout.addWidget(QLabel("Добавить новый анкор:"))
-        layout.addLayout(add_layout)
-
-        self.anchor_list = QListWidget()
-        layout.addWidget(QLabel("Текущие анкоры:"))
-        layout.addWidget(self.anchor_list)
-
-        rm_layout = QHBoxLayout()
-        self.remove_selected_btn = QPushButton("Удалить выбранный анкор")
-        self.clear_all_btn = QPushButton("Очистить все анкоры для слова")
-        rm_layout.addWidget(self.remove_selected_btn)
-        rm_layout.addWidget(self.clear_all_btn)
-        layout.addLayout(rm_layout)
-
-        self.load_defaults_btn = QPushButton("Загрузить анкоры по умолчанию")
-        layout.addWidget(self.load_defaults_btn)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        layout.addWidget(btn_box)
-
-        self.setLayout(layout)
-
-        self.keyword_list.currentItemChanged.connect(self.load_anchors_for_keyword)
-        self.add_anchor_btn.clicked.connect(self.add_anchor)
-        self.remove_selected_btn.clicked.connect(self.remove_selected_anchor)
-        self.clear_all_btn.clicked.connect(self.clear_all_anchors)
-        self.load_defaults_btn.clicked.connect(self.load_default_anchors)
-        btn_box.accepted.connect(self.accept)
-        btn_box.rejected.connect(self.reject)
-
-        self.anchors_dict = {}
-        self.load_default_anchors()
-
-    def load_default_anchors(self):
-        default_templates = [
-            "buy cheap {keyword} online",
-            "order {keyword} pills without prescription",
-            "purchase {keyword} safely",
-            "best price on {keyword} tablets",
-            "{keyword} tablets for sale",
-            "buy {keyword} online pharmacy",
-            "cheap {keyword} medication",
-            "buy {keyword} without RX",
-            "where to buy {keyword} online",
-            "order generic {keyword} pills",
-            "{keyword} pills discreet shipping",
-            "secure online purchase of {keyword}",
-            "{keyword} tablets online no prescription",
-            "best place to buy {keyword} online",
-            "{keyword} affordable prices",
-            "{keyword} online order fast delivery",
-            "trusted pharmacy for {keyword}",
-            "how to buy {keyword} online",
-            "{keyword} medication online safely",
-            "{keyword} pills from reliable pharmacy",
-            "discounted {keyword} tablets online",
-            "order {keyword} medication discreetly",
-            "{keyword} without prescription cheap",
-            "reliable supplier of {keyword} online",
-            "{keyword} tablets purchase safely",
-            "safe and fast {keyword} pills",
-            "low-cost {keyword} tablets",
-            "genuine {keyword} available online",
-            "{keyword} pills online overnight",
-            "trusted source for {keyword} medication"
-        ]
-
-        new_d = {}
-        for k in keywords:
-            new_d[k] = {tpl.format(keyword=k) for tpl in default_templates}
-        self.anchors_dict = new_d
-        self.load_anchors_for_keyword()
-
-    def add_anchor(self):
-        kw_item = self.keyword_list.currentItem()
-        if not kw_item:
-            return
-        kw = kw_item.text()
-        text_ = self.anchor_input.text().strip()
-        if not text_:
-            return
-        if kw not in self.anchors_dict:
-            self.anchors_dict[kw] = set()
-        self.anchors_dict[kw].add(text_)
-        self.load_anchors_for_keyword()
-        self.anchor_input.clear()
-
-    def remove_selected_anchor(self):
-        kw_item = self.keyword_list.currentItem()
-        if not kw_item:
-            return
-        kw = kw_item.text()
-        sel = self.anchor_list.currentItem()
-        if not sel:
-            return
-        val = sel.text()
-        if kw in self.anchors_dict and val in self.anchors_dict[kw]:
-            self.anchors_dict[kw].remove(val)
-        self.load_anchors_for_keyword()
-
-    def clear_all_anchors(self):
-        kw_item = self.keyword_list.currentItem()
-        if not kw_item:
-            return
-        kw = kw_item.text()
-        if kw in self.anchors_dict:
-            self.anchors_dict[kw].clear()
-        self.load_anchors_for_keyword()
-
-    def load_anchors_for_keyword(self):
-        self.anchor_list.clear()
-        kw_item = self.keyword_list.currentItem()
-        if not kw_item:
-            return
-        kw = kw_item.text()
-        if kw in self.anchors_dict:
-            ls = sorted(self.anchors_dict[kw])
-            self.anchor_list.addItems(ls)
 
 ###############################################################################
-# Диалог главной (star-схемы)
-###############################################################################
-class MainPageChoiceDialog(QDialog):
-    def __init__(self, pages: List[str], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Выбор главной страницы")
-        self.setMinimumWidth(700)
-        self.main_url = None
-
-        layout = QVBoxLayout()
-        self.list_widget = QListWidget()
-        for p in pages:
-            self.list_widget.addItem(p)
-        layout.addWidget(QLabel("Выберите главный URL (для star-схемы):"))
-        layout.addWidget(self.list_widget)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        layout.addWidget(btn_box)
-        self.setLayout(layout)
-
-        btn_box.accepted.connect(self.ok_clicked)
-        btn_box.rejected.connect(self.reject)
-
-    def ok_clicked(self):
-        sel = self.list_widget.currentItem()
-        if sel:
-            self.main_url = sel.text()
-        self.accept()
-
-####################
-# LinkScheme
-####################
-class LinkScheme:
-    def __init__(self, scheme_name: str):
-        self.scheme = scheme_name
-        self.main_url = None
-
-    def set_main_url(self, main_url: str):
-        self.main_url = main_url
-
-    def build_links(self, pages: List[str]) -> List[Tuple[str, str]]:
-        if len(pages) < 2:
-            return []
-        if self.scheme == "chain":
-            result = []
-            for i in range(len(pages) - 1):
-                result.append((pages[i], pages[i + 1]))
-            return result
-        elif self.scheme == "star-to-one":
-            if self.main_url and (self.main_url in pages):
-                center = self.main_url
-            else:
-                center = pages[0]
-            return [(p, center) for p in pages if p != center]
-        elif self.scheme == "star-from-one":
-            if self.main_url and (self.main_url in pages):
-                center = self.main_url
-            else:
-                center = pages[0]
-            return [(center, p) for p in pages if p != center]
-        elif self.scheme == "random":
-            result = []
-            for i in range(len(pages)):
-                A = pages[i]
-                B_candidates = [x for x in pages if x != A]
-                if not B_candidates:
-                    continue
-                B = random.choice(B_candidates)
-                result.append((A, B))
-            return result
-        return []
-
-###############################################################################
-# LinkGenerator
+# LinkGenerator (упрощённый - только сбор страниц)
 ###############################################################################
 class LinkGenerator:
     def __init__(self, directory: str):
         self.directory = directory
         self.pages_by_domain: Dict[str, Dict[str, str]] = {}
-        self.relevant_pages: Dict[str, List[str]] = {}
-        self.page_topics: Dict[str, str] = {}
-        self.anchors: Dict[str, Set[str]] = {}
-        self.scheme_name = "chain"
-        self.main_url_overrides: Dict[str, str] = {}
         self._gather_pages()
-        self.min_text_node_length = 40
-        self.allow_fallback_insertion = False
-
-    def set_link_scheme(self, scheme: str):
-        self.scheme_name = scheme
-
-    def set_main_url_for_topic(self, topic, url):
-        self.main_url_overrides[topic] = url
 
     def _gather_pages(self):
         if not os.path.isdir(self.directory):
@@ -781,267 +545,6 @@ class LinkGenerator:
         enc = det.get('encoding') or 'utf-8'
         return raw_data.decode(enc, errors='replace')
 
-    # def analyze_pages(self) -> Dict[str, List[str]]:
-    #     self.relevant_pages = {}
-    #     self.page_topics = {}
-    #     for dom, mapping in self.pages_by_domain.items():
-    #         for rel_file, url in mapping.items():
-    #             fullp = os.path.join(self.directory, dom, rel_file)
-    #             try:
-    #                 content = self._read_file(fullp)
-    #                 soup = BeautifulSoup(content, 'html.parser')
-    #                 if not soup.title or not soup.title.string:
-    #                     continue
-    #                 title_ = soup.title.string.lower()
-    #                 found_topic = None
-    #                 for kw_ in keywords:
-    #                     pat = re.compile(r'\b' + re.escape(kw_.lower()) + r'\b')
-    #                     if pat.search(title_):
-    #                         found_topic = kw_
-    #                         break
-    #                 if found_topic:
-    #                     if found_topic not in self.relevant_pages:
-    #                         self.relevant_pages[found_topic] = []
-    #                     self.relevant_pages[found_topic].append(url)
-    #                     self.page_topics[url] = found_topic
-    #             except:
-    #                 pass
-    #     return self.relevant_pages
-
-    def analyze_pages(self) -> Dict[str, List[str]]:
-        self.relevant_pages = {}
-        self.page_topics = {}
-
-        # Готовим словарь всех синонимов таблеток
-        synonym_to_main_keyword = {}
-        for key, val in keywords.items():
-            synonym_to_main_keyword[key] = val
-            synonym_to_main_keyword[val] = val
-
-        for dom, mapping in self.pages_by_domain.items():
-            for rel_file, url in mapping.items():
-                fullp = os.path.join(self.directory, dom, rel_file)
-                try:
-                    content = self._read_file(fullp)
-                    soup = BeautifulSoup(content, 'html.parser')
-                    if not soup.title or not soup.title.string:
-                        continue
-                    title_ = soup.title.string.lower()
-                    found_topic = None
-
-                    # Проверяем наличие любого синонима в тайтле
-                    for synonym, main_keyword in synonym_to_main_keyword.items():
-                        if re.search(r'\b' + re.escape(synonym.lower()) + r'\b', title_):
-                            found_topic = main_keyword
-                            break
-
-                    if found_topic:
-                        if found_topic not in self.relevant_pages:
-                            self.relevant_pages[found_topic] = []
-                        self.relevant_pages[found_topic].append(url)
-                        self.page_topics[url] = found_topic
-                except:
-                    pass
-        return self.relevant_pages
-
-
-
-    def set_anchors(self, anchor_dict: Dict[str, Set[str]]):
-        self.anchors = anchor_dict
-
-    def _build_links_plan(self) -> List[Tuple[str, str, str]]:
-        plan = []
-        for topic, pages in self.relevant_pages.items():
-            if len(pages) < 2:
-                continue
-            scheme = LinkScheme(self.scheme_name)
-            if topic in self.main_url_overrides:
-                scheme.set_main_url(self.main_url_overrides[topic])
-            sub = scheme.build_links(pages)
-            for (A, B) in sub:
-                plan.append((A, B, topic))
-        return plan
-
-    def _is_forbidden_parent(self, tag) -> bool:
-        forbidden_tags = {
-            'script', 'style', 'meta', 'head', 'link', 'button', 'code', 'pre',
-            'nav', 'footer', 'header', 'menu', 'aside'
-        }
-        while tag:
-            if tag.name and tag.name.lower() in forbidden_tags:
-                return True
-            cls = tag.get('class') or []
-            if isinstance(cls, str):
-                cls = [cls]
-            allc = " ".join(cls).lower()
-            if any(x in allc for x in
-                   ["header", "footer", "menu", "nav", "aside", "script", "bsa", "applugin", "display-none"]):
-                return True
-            my_id = tag.get('id', '').lower()
-            if any(x in my_id for x in ["header", "footer", "menu", "nav", "aside", "script", "bsa", "applugin"]):
-                return True
-            st = tag.get('style', '').lower()
-            if 'display' in st and 'none' in st:
-                return True
-            tag = tag.parent
-        return False
-
-    def _is_in_a_tag(self, node) -> bool:
-        return node.find_parent('a') is not None
-
-    def _is_inside_content_area(self, node) -> bool:
-        return True  # Упрощенно считаем, что везде можно
-
-    def _find_text_nodes_for_insertion(self, soup) -> list:
-        text_nodes = []
-        all_texts = soup.find_all(string=lambda s: not isinstance(s, Comment))
-        for tnode in all_texts:
-            stripped = tnode.strip()
-            if len(stripped) < self.min_text_node_length:
-                continue
-            if self._is_forbidden_parent(tnode.parent):
-                continue
-            if self._is_in_a_tag(tnode):
-                continue
-            if not self._is_inside_content_area(tnode):
-                continue
-            text_nodes.append(tnode)
-        return text_nodes
-
-    def _fallback_insert(self, soup, content: str):
-        body = soup.find('body')
-        if not body:
-            soup.append(BeautifulSoup(content, 'html.parser'))
-        else:
-            body.append(BeautifulSoup(content, 'html.parser'))
-
-    def generate_links(self, max_links_per_page: int):
-        # Создаём план перелинковки (URL откуда, куда и какой топик)
-        plan = self._build_links_plan()
-        logger.info(f"Схема: {self.scheme_name}. Всего пар ссылок для вставки: {len(plan)}")
-
-        # Карта URL на их файлы для удобного доступа
-        url_map = {u: (dom, rf) for dom, mapping in self.pages_by_domain.items() for rf, u in mapping.items()}
-
-        # Счётчик вставленных ссылок по каждому файлу
-        inserted_count: Dict[str, int] = {}
-
-        # Множество для предотвращения вставки одинаковых пар URL
-        already_inserted_pairs = set()
-
-        # Начинаем перебор плана перелинковки
-        for (urlA, urlB, topic) in plan:
-            # Проверка на уже вставленную пару URL
-            if (urlA, urlB) in already_inserted_pairs:
-                logger.info(f"Пара {urlA} -> {urlB} уже была вставлена, пропускаем.")
-                continue
-
-            # Получаем случайный анкор для текущего топика
-            anchor = random.choice(list(self.anchors.get(topic, [])))
-
-            # Проверка, что URL-A существует
-            if urlA not in url_map:
-                logger.error(f"URL {urlA} не найден в url_map, пропускаем.")
-                continue
-
-            # Получаем путь к файлу для URL-A
-            domA, rel_fileA = url_map[urlA]
-            file_path = os.path.join(self.directory, domA, rel_fileA)
-
-            # Проверка, что файл физически существует
-            if not os.path.isfile(file_path):
-                logger.error(f"Файл {file_path} не существует, пропускаем.")
-                continue
-
-            # Проверка, не превышено ли количество ссылок на страницу
-            if inserted_count.get(file_path, 0) >= max_links_per_page:
-                logger.info(f"В файл {file_path} уже вставлено максимум ссылок ({max_links_per_page}).")
-                continue
-
-            # Читаем содержимое файла с автоматическим определением кодировки
-            try:
-                with open(file_path, 'rb') as f:
-                    raw_data = f.read()
-                encoding = chardet.detect(raw_data).get('encoding') or 'utf-8'
-                html_text = raw_data.decode(encoding, errors='replace')
-            except Exception as e:
-                logger.error(f"Ошибка чтения файла {file_path}: {e}")
-                continue
-
-            # Парсим HTML-контент
-            soup = BeautifulSoup(html_text, 'html.parser')
-            # Получаем текстовые узлы для вставки ссылок
-            text_nodes = self._find_text_nodes_for_insertion(soup)
-            random.shuffle(text_nodes)
-
-            inserted = False  # Флаг успешной вставки ссылки
-
-            # Перебираем текстовые узлы для вставки
-            for node in text_nodes:
-                # Проверка на максимальное количество ссылок
-                if inserted_count.get(file_path, 0) >= max_links_per_page:
-                    break
-
-                # Проверка наличия анкора в текущем узле, чтобы избежать дублей
-                if anchor.lower() in node.lower():
-                    continue
-
-                # Разбиваем текстовый узел на слова и пробелы
-                tokens = re.split(r'(\s+)', str(node))
-                if len(tokens) <= 1:
-                    continue  # Если нет подходящих слов для вставки, пропускаем узел
-
-                # Выбираем случайное место вставки ссылки
-                idx = random.randint(0, len(tokens) - 1)
-
-                # Создаём тег <a> безопасным способом без повторного парсинга HTML
-                link_tag = soup.new_tag('a', href=urlB)
-                link_tag.string = anchor
-
-                # Аккуратно вставляем новый тег прямо в список элементов узла
-                new_frag = []
-                for i, token in enumerate(tokens):
-                    if i == idx:
-                        new_frag.append(link_tag)
-                    new_frag.append(token)
-
-                # Заменяем оригинальный текстовый узел новым фрагментом с ссылкой
-                node.replace_with(*new_frag)
-
-                inserted = True
-                inserted_count[file_path] = inserted_count.get(file_path, 0) + 1
-                already_inserted_pairs.add((urlA, urlB))  # Запоминаем вставленную пару ссылок
-
-                # Логирование контекста вставки
-                left_context = tokens[idx - 1] if idx > 0 else ""
-                right_context = tokens[idx + 1] if idx < len(tokens) - 1 else ""
-                logger.info(
-                    f"[1-й этап] Вставлена ссылка:\n"
-                    f"Файл: {file_path}\n"
-                    f"Анкор: {anchor}\n"
-                    f"Ссылка: {urlA} -> {urlB}\n"
-                    f"Контекст: {left_context} <<<{anchor}>>> {right_context}"
-                )
-                break  # После вставки ссылки завершаем цикл по узлам страницы
-
-            # Фоллбек-вставка, если не удалось вставить ссылку в текстовые узлы
-            if (not inserted) and self.allow_fallback_insertion and inserted_count.get(file_path,
-                                                                                       0) < max_links_per_page:
-                fallback_html = f"<p><a href='{urlB}'>{anchor}</a></p>"
-                self._fallback_insert(soup, fallback_html)
-                inserted_count[file_path] = inserted_count.get(file_path, 0) + 1
-                already_inserted_pairs.add((urlA, urlB))
-                logger.info(f"[1-й этап] Выполнена фоллбек-вставка в файл {file_path}")
-
-            # Сохраняем изменения обратно в файл после вставки
-            if inserted or self.allow_fallback_insertion:
-                try:
-                    with open(file_path, "w", encoding="utf-8", errors="replace") as f:
-                        f.write(str(soup))
-                except Exception as e:
-                    logger.error(f"Ошибка записи файла {file_path}: {e}")
-
-        logger.info("Генерация ссылок (1-й этап) успешно завершена!")
 
 ###############################################################################
 # Главное окно (GUI)
@@ -1053,16 +556,16 @@ class LinkGeneratorGUI(QWidget):
         self.setGeometry(100, 100, 1200, 800)
 
         self.generator = None
-        # Обратите внимание: здесь упоминается self.lm_studio,
-        # но в данном файле класс LMStudioConnector вынесен во 2-й файл
         self.lm_studio = None
 
         main_layout = QVBoxLayout(self)
 
+        # --- HELP ---
         help_btn = QPushButton("HELP")
         help_btn.clicked.connect(self.on_help)
         main_layout.addWidget(help_btn, alignment=Qt.AlignmentFlag.AlignRight)
 
+        # --- Директория ---
         dir_layout = QHBoxLayout()
         self.dir_label = QLabel("Выбранная директория: нет")
         self.browse_btn = QPushButton("Обзор")
@@ -1071,11 +574,11 @@ class LinkGeneratorGUI(QWidget):
         dir_layout.addWidget(self.browse_btn)
         main_layout.addLayout(dir_layout)
 
+        # --- LM Studio ---
         model_layout = QHBoxLayout()
         model_layout.addWidget(QLabel("Выбор model_id для LM Studio:"))
         self.model_combo = QComboBox()
         self.model_combo.setMinimumWidth(300)
-        # Пустой при старте — заполнится при нажатии "Обновить"
         self.model_combo.addItem("-- Нажмите 'Обновить модели' --")
         model_layout.addWidget(self.model_combo)
 
@@ -1088,40 +591,20 @@ class LinkGeneratorGUI(QWidget):
         model_layout.addWidget(self.load_model_btn)
         main_layout.addLayout(model_layout)
 
+        # --- Верхний ряд кнопок ---
         top_h = QHBoxLayout()
-        self.grabber_btn = QPushButton("Граббер")
-        self.grabber_btn.clicked.connect(self.on_grabber)
 
-        self.second_stage_btn = QPushButton("Внешние ссылки (2-й этап)")
-        self.second_stage_btn.clicked.connect(self.on_second_stage)
-
-        # После строки с self.second_stage_btn:
         self.cluster_link_btn = QPushButton("🔗 Кластерная перелинковка (SEO)")
         self.cluster_link_btn.clicked.connect(self.on_cluster_linking)
-
         top_h.addWidget(self.cluster_link_btn)
+
+        self.grabber_btn = QPushButton("Граббер")
+        self.grabber_btn.clicked.connect(self.on_grabber)
+        top_h.addWidget(self.grabber_btn)
 
         self.content_btn = QPushButton("Контент (SEO) LM Studio")
         self.content_btn.clicked.connect(self.on_content)
-
-        top_h.addWidget(self.grabber_btn)
-        top_h.addWidget(self.second_stage_btn)
         top_h.addWidget(self.content_btn)
-        main_layout.addLayout(top_h)
-
-        an_h = QHBoxLayout()
-        self.analyze_btn = QPushButton("Анализ страниц (1-й этап)")
-        self.analyze_btn.setEnabled(False)
-        self.analyze_btn.clicked.connect(self.on_analyze)
-
-        self.anchor_btn = QPushButton("Настройка анкоров (1-й этап)")
-        self.anchor_btn.setEnabled(False)
-        self.anchor_btn.clicked.connect(self.on_anchor)
-
-        self.replace_txt_btn = QPushButton("Замена контента из txt и TITLE")
-        self.replace_txt_btn.setEnabled(False)
-        self.replace_txt_btn.clicked.connect(self.on_replace_from_txt)
-        an_h.addWidget(self.replace_txt_btn)
 
         self.graph_btn = QPushButton("Графики")
         self.graph_btn.clicked.connect(self.show_graph_dialog)
@@ -1131,65 +614,33 @@ class LinkGeneratorGUI(QWidget):
         self.give_urls_btn.clicked.connect(self.on_give_me_urls)
         top_h.addWidget(self.give_urls_btn)
 
-        # Кнопка Google Indexer
+        main_layout.addLayout(top_h)
+
+        # --- Второй ряд кнопок ---
+        row2_h = QHBoxLayout()
+
+        self.replace_txt_btn = QPushButton("Замена контента из txt и TITLE")
+        self.replace_txt_btn.setEnabled(False)
+        self.replace_txt_btn.clicked.connect(self.on_replace_from_txt)
+        row2_h.addWidget(self.replace_txt_btn)
+
         self.indexer_btn = QPushButton("Google Indexing 🚀")
         self.indexer_btn.setStyleSheet("""
-                    QPushButton { background-color: #1a7f37; color: white; font-weight: bold; }
-                    QPushButton:hover { background-color: #2ea043; }
-                """)
+            QPushButton { background-color: #1a7f37; color: white; font-weight: bold; }
+            QPushButton:hover { background-color: #2ea043; }
+        """)
         self.indexer_btn.clicked.connect(self.on_google_indexer)
-        top_h.addWidget(self.indexer_btn)
+        row2_h.addWidget(self.indexer_btn)
 
-        # --- НАЧАЛО ВСТАВКИ ---
         self.pbn_analyze_btn = QPushButton("📊 PBN Analyzer (Fat Pages)")
         self.pbn_analyze_btn.clicked.connect(self.on_pbn_analyze)
-        self.pbn_analyze_btn.setStyleSheet(
-            "background-color: #4a3b69; color: white; font-weight: bold;")  # Выделим цветом
-        top_h.addWidget(self.pbn_analyze_btn)
-        # --- КОНЕЦ ВСТАВКИ ---
+        self.pbn_analyze_btn.setStyleSheet("background-color: #4a3b69; color: white; font-weight: bold;")
+        row2_h.addWidget(self.pbn_analyze_btn)
 
-        an_h.addWidget(self.analyze_btn)
-        an_h.addWidget(self.anchor_btn)
-        main_layout.addLayout(an_h)
+        row2_h.addStretch()
+        main_layout.addLayout(row2_h)
 
-        sc_h = QHBoxLayout()
-        sc_h.addWidget(QLabel("Схема перелинковки:"))
-        self.scheme_combo = QComboBox()
-        self.scheme_combo.addItems(["chain", "star-to-one", "star-from-one", "random"])
-        sc_h.addWidget(self.scheme_combo)
-        main_layout.addLayout(sc_h)
-
-        param_h = QHBoxLayout()
-        left_v = QVBoxLayout()
-        self.min_len_spin = QSpinBox()
-        self.min_len_spin.setRange(1, 2000)
-        self.min_len_spin.setValue(40)
-        left_v.addWidget(QLabel("Min text node length (1-й этап):"))
-        left_v.addWidget(self.min_len_spin)
-        right_v = QVBoxLayout()
-        self.fallback_check = QCheckBox("Фолбэк вставка (1-й этап)")
-        right_v.addWidget(self.fallback_check)
-        param_h.addLayout(left_v)
-        param_h.addLayout(right_v)
-        main_layout.addLayout(param_h)
-
-        self.result_view = QTextEdit()
-        self.result_view.setReadOnly(True)
-        main_layout.addWidget(QLabel("Результаты анализа (1-й этап):"))
-        main_layout.addWidget(self.result_view)
-
-        gen_h = QHBoxLayout()
-        self.max_links_spin = QSpinBox()
-        self.max_links_spin.setRange(1, 10)
-        self.max_links_spin.setValue(3)
-        self.gen_btn = QPushButton("Генерировать (1-й этап)")
-        self.gen_btn.setEnabled(False)
-        self.gen_btn.clicked.connect(self.on_generate_links)
-        gen_h.addWidget(QLabel("Макс ссылок на стр. (1-й этап):"))
-        gen_h.addWidget(self.max_links_spin)
-        gen_h.addWidget(self.gen_btn)
-        main_layout.addLayout(gen_h)
-
+        # --- Лог ---
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
         main_layout.addWidget(QLabel("Лог:"))
@@ -1199,57 +650,64 @@ class LinkGeneratorGUI(QWidget):
         self.spinner = SpinnerOverlay(self)
         self.spinner.hide()
 
+        # --- Авто-загрузка директории по умолчанию ---
         self.default_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "template_grab")
         if os.path.isdir(self.default_dir) and not self.generator:
             self.generator = LinkGenerator(self.default_dir)
             self.dir_label.setText(f"Выбранная директория: {self.default_dir}")
-            self.analyze_btn.setEnabled(True)
             self.replace_txt_btn.setEnabled(True)
-        ####################
-        ##### GRAPHICS #####
-        ####################
+
+    ####################
+    ##### GRAPHICS #####
+    ####################
 
     def show_graph_dialog(self):
         if not self.generator:
             QMessageBox.warning(self, "Ошибка", "Сначала выберите директорию с HTML!")
             return
 
-        self.generator.analyze_pages()
+        # Используем SEOClusterLinker для анализа
+        from seo_cluster_linker import SEOClusterLinker
+
+        linker = SEOClusterLinker(self.generator.directory, keywords)
+        clusters = linker.build_clusters()
 
         nodes = []
         edges = []
-
         url_to_node = {}
 
-        for tablet in self.generator.relevant_pages.keys():
+        # Добавляем узлы таблеток
+        for topic in clusters.keys():
             nodes.append({
-                "id": f"tablet-{tablet}",
-                "label": tablet,
+                "id": f"tablet-{topic}",
+                "label": topic,
                 "group": "tablet",
                 "size": 30,
                 "color": "#FFA500"
             })
 
-        for tablet, urls in self.generator.relevant_pages.items():
-            for url in urls:
-                node_id = url.rstrip('/')
-                url_to_node[url.rstrip('/')] = node_id
+        # Добавляем узлы страниц
+        for topic, cluster in clusters.items():
+            for page in cluster.pages:
+                node_id = page.url.rstrip('/')
+                url_to_node[node_id] = node_id
                 nodes.append({
                     "id": node_id,
-                    "label": urlparse(url).netloc.replace('www.', ''),
-                    "url": url,
+                    "label": urlparse(page.url).netloc.replace('www.', ''),
+                    "url": page.url,
                     "group": "page",
                     "size": 15,
                     "color": "#87CEFA"
                 })
                 edges.append({
-                    "from": f"tablet-{tablet}",
+                    "from": f"tablet-{topic}",
                     "to": node_id,
                     "arrows": "to",
                     "color": {"color": "#CCCCCC"},
                     "label": ""
                 })
 
+        # Получаем существующие ссылки из HTML
         actual_links = self._get_actual_links_from_html()
 
         for url_from, links_to in actual_links.items():
@@ -1268,9 +726,6 @@ class LinkGeneratorGUI(QWidget):
 
         dlg = GraphDialog(nodes, edges, self)
         dlg.exec()
-
-
-
 
     def _simplify_url(self, url):
         parsed = urlparse(url.lower().rstrip('/'))
@@ -1394,7 +849,6 @@ class LinkGeneratorGUI(QWidget):
             return
         self.generator = LinkGenerator(d)
         self.dir_label.setText(f"Выбрана директория: {d}")
-        self.analyze_btn.setEnabled(True)
         self.replace_txt_btn.setEnabled(True)
         self.update_log_view()
 
@@ -1405,19 +859,16 @@ class LinkGeneratorGUI(QWidget):
 
         from content_replacer import ReplaceFromTxtDialog
         diag = ReplaceFromTxtDialog(content_dir=self.generator.directory, parent=self)
-        diag.setModal(True)  # делаем модальным
-        diag.raise_()  # выводим на передний план
-        diag.activateWindow()  # даём фокус
-        diag.exec()  # запускаем
+        diag.setModal(True)
+        diag.raise_()
+        diag.activateWindow()
+        diag.exec()
 
     def on_connect_lm_studio(self):
-        """
-        Подключение к LM Studio.
-        """
+        """Подключение к LM Studio."""
         from lm_studio_connector import LMStudioConnector
         chosen_model = self.model_combo.currentText()
 
-        # Проверка, что выбрана реальная модель
         if not chosen_model or chosen_model.startswith("--"):
             QMessageBox.warning(self, "Ошибка",
                                 "Сначала нажмите 'Обновить модели' и выберите модель из списка!")
@@ -1431,10 +882,7 @@ class LinkGeneratorGUI(QWidget):
             self.lm_studio = None
 
     def fetch_lm_studio_models(self) -> list:
-        """
-        Получает список доступных моделей из LM Studio API.
-        Возвращает список model_id или пустой список при ошибке.
-        """
+        """Получает список доступных моделей из LM Studio API."""
         import requests
         try:
             resp = requests.get("http://127.0.0.1:1234/v1/models", timeout=10)
@@ -1447,9 +895,7 @@ class LinkGeneratorGUI(QWidget):
             return []
 
     def on_refresh_models(self):
-        """
-        Обновляет список моделей в ComboBox, запрашивая их из LM Studio.
-        """
+        """Обновляет список моделей в ComboBox."""
         models = self.fetch_lm_studio_models()
         self.model_combo.clear()
         if models:
@@ -1463,20 +909,9 @@ class LinkGeneratorGUI(QWidget):
                                 "Проверьте, что LM Studio запущен на http://127.0.0.1:1234")
 
     def on_grabber(self):
-        from grabber import UrlGrabberDialog  # новый файл
+        from grabber import UrlGrabberDialog
         dlg = UrlGrabberDialog(self)
         dlg.exec()
-
-    def on_second_stage(self):
-        try:
-            if not self.generator:
-                QMessageBox.warning(self, "Ошибка", "Сначала выберите директорию с HTML!")
-                return
-            dlg = SecondStageLinkDialog(self.generator.directory, self)
-            dlg.exec()
-        except Exception as e:
-            logger.error(f"SecondStage error: {e}")
-            QMessageBox.critical(self, "Ошибка", f"SecondStage: {e}")
 
     def on_content(self):
         if not self.lm_studio:
@@ -1490,7 +925,7 @@ class LinkGeneratorGUI(QWidget):
             diag = ContentRewriteDialog(
                 self.lm_studio,
                 PromptManager(),
-                content_dir=self.generator.directory,  # вот тут передаём текущую директорию
+                content_dir=self.generator.directory,
                 parent=self
             )
             diag.exec()
@@ -1498,85 +933,12 @@ class LinkGeneratorGUI(QWidget):
             logger.error(f"ContentRewriteDialog error: {e}")
             QMessageBox.critical(self, "Ошибка", f"Content: {e}")
 
-    def on_analyze(self):
-        if not self.generator:
-            QMessageBox.warning(self, "Ошибка", "Не выбрана директория!")
-            return
-
-        self.spinner.setGeometry(self.rect())
-        self.spinner.show()
-        QApplication.processEvents()
-
-        def on_finish(res):
-            txt = "Результаты анализа (1-й этап):\n"
-            for kw, arr in res.items():
-                txt += f"{kw}: {len(arr)}\n"
-            self.result_view.setText(txt)
-            self.anchor_btn.setEnabled(True)
-            self.update_log_view()
-            self.spinner.hide()
-
-        def on_error(msg):
-            logger.error(f"Analyze error: {msg}")
-            QMessageBox.critical(self, "Ошибка", "Analyze error")
-            self.spinner.hide()
-
-        self.worker = AnalyzePagesWorker(self.generator)
-        self.worker.finished.connect(on_finish)
-        self.worker.error.connect(on_error)
-        self.worker.start()
-
-    def on_anchor(self):
-        if not self.generator:
-            return
-        try:
-            dlg = AnchorDialog(set(keywords.keys()), self)
-            if dlg.exec():
-                self.generator.set_anchors(dlg.anchors_dict)
-                self.gen_btn.setEnabled(True)
-            self.update_log_view()
-        except Exception as e:
-            logger.error(f"Anchor error: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Anchor: {e}")
-
-    def on_generate_links(self):
-        if not self.generator:
-            QMessageBox.warning(self, "Ошибка", "Нет генератора (1-й этап)!")
-            return
-        try:
-            self.spinner.setGeometry(self.rect())
-            self.spinner.show()
-            QApplication.processEvents()
-            scheme = self.scheme_combo.currentText()
-            self.generator.set_link_scheme(scheme)
-            if scheme in ["star-to-one", "star-from-one"]:
-                for t, arr in self.generator.relevant_pages.items():
-                    if len(arr) < 2:
-                        continue
-                    mp_dlg = MainPageChoiceDialog(arr, self)
-                    mp_dlg.setWindowTitle(f"Главная страница для {t}")
-                    if mp_dlg.exec():
-                        if mp_dlg.main_url:
-                            self.generator.set_main_url_for_topic(t, mp_dlg.main_url)
-
-            self.generator.min_text_node_length = self.min_len_spin.value()
-            self.generator.allow_fallback_insertion = self.fallback_check.isChecked()
-            mx = self.max_links_spin.value()
-            self.generator.generate_links(mx)
-            self.update_log_view()
-            QMessageBox.information(self, "OK", "Ссылки (1-й этап) сгенерированы!")
-        except Exception as e:
-            logger.error(f"Gen links error: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Gen links: {e}")
-        finally:
-            self.spinner.hide()
-
     def on_give_me_urls(self):
         if not self.generator:
             QMessageBox.warning(self, "Ошибка", "Не выбрана директория!")
             return
 
-        # 2. Спросить у пользователя trackerKey (это оставляем тут!)
+        # Спросить у пользователя trackerKey
         tracker_dialog = QDialog(self)
         tracker_dialog.setWindowTitle("Выберите проект (trackerKey)")
         vbox = QVBoxLayout()
@@ -1613,14 +975,10 @@ class LinkGeneratorGUI(QWidget):
         QApplication.processEvents()
 
         def on_finish(output):
-            # Найди HTML-блок из вывода (ты печатаешь final_html в url_from_folder.py)
-            # Обычно html начинается с <html> и заканчивается </html>
-            # Получаем только HTML часть между разделителями
             html_result = output
             if "===START_HTML===" in output and "===END_HTML===" in output:
                 html_result = output.split("===START_HTML===")[1].split("===END_HTML===")[0].strip()
 
-            # НОКАШ и ТАБЛЕТКИ разбирай по plain-тексту (output, а не html_result)
             def extract_nocache_links(text):
                 links = []
                 in_block = False
@@ -1628,10 +986,8 @@ class LinkGeneratorGUI(QWidget):
                     if "ALL NO-CACHE LINKS" in line:
                         in_block = True
                         continue
-                    # конец блока — если новая секция или полностью пустая строка (но пустые строки между ссылками бывают!)
                     if in_block and line.strip().startswith("ALL KEITARO JSON"):
                         break
-                    # главное: брать только строки, содержащие и http, и "/?nocache"
                     if in_block and line.strip().startswith("http") and "/?nocache" in line:
                         links.append(line.strip())
                 return links
@@ -1666,7 +1022,7 @@ class LinkGeneratorGUI(QWidget):
 
         self.generator.tracker_key = tracker_key
         self.worker = GiveMeUrlsWorker(self.generator)
-        self.worker.tracker_key = tracker_key  # передаём выбранный ключ
+        self.worker.tracker_key = tracker_key
         self.worker.finished.connect(on_finish)
         self.worker.error.connect(on_error)
         self.worker.start()
@@ -1681,16 +1037,17 @@ class LinkGeneratorGUI(QWidget):
             pass
 
     def on_cluster_linking(self):
+        if not self.generator:
+            QMessageBox.warning(self, "Ошибка", "Сначала выберите директорию с HTML!")
+            return
         dialog = SEOClusterDialog(self.generator.directory, parent=self)
         dialog.exec()
 
     def on_pbn_analyze(self):
-        """Запуск PBN анализатора (Метод 4)"""
+        """Запуск PBN анализатора"""
         if not self.generator:
             QMessageBox.warning(self, "Ошибка", "Сначала выберите директорию с HTML!")
             return
-
-        # Передаем путь к папке из текущего генератора
         dlg = PbnAnalyzerDialog(self.generator.directory, self)
         dlg.exec()
 
@@ -1701,6 +1058,7 @@ class LinkGeneratorGUI(QWidget):
             dlg.exec()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось запустить индексатор:\n{e}")
+
 
 class UrlsResultDialog(QDialog):
     def __init__(self, html_text, nocache_links=None, tablet_map=None, parent=None):
@@ -1715,7 +1073,6 @@ class UrlsResultDialog(QDialog):
         """)
 
         layout = QVBoxLayout(self)
-        # Заменяем QTextBrowser на QWebEngineView
         self.browser = QWebEngineView(self)
         self.browser.setHtml(html_text)
         layout.addWidget(self.browser)
@@ -1743,10 +1100,8 @@ class UrlsResultDialog(QDialog):
         if not nocache_links:
             QMessageBox.warning(self, "Нет данных", "Нет ссылок для проверки.")
             return
-
         dlg = PrintCheckTableDialog(nocache_links, self)
         dlg.exec()
-
 
     def run_nocache_check(self, nocache_links, tablet_map):
         if not nocache_links:
@@ -1756,13 +1111,11 @@ class UrlsResultDialog(QDialog):
         dlg.exec()
 
     def copy_all(self):
-        # Получить ВЕСЬ видимый текст из QWebEngineView:
         self.browser.page().toPlainText(self._set_clipboard)
 
     def _set_clipboard(self, text):
         QApplication.clipboard().setText(text)
 
-    # show_nocache_table оставляю без изменений (не зависит от рендера результата)
     def show_nocache_table(self, results):
         dlg = QDialog(self)
         dlg.setWindowTitle("NOCACHE ПРОВЕРКА")

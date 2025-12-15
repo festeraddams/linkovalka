@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QSpinBox, QCheckBox, QGroupBox, QTextEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
     QMessageBox, QTabWidget, QWidget, QSplitter, QFrame,
-    QAbstractItemView, QFileDialog
+    QAbstractItemView, QFileDialog, QPlainTextEdit
 )
 from PyQt6.QtGui import QColor, QFont
 
@@ -436,6 +436,9 @@ class SEOClusterDialog(QDialog):
         # Вкладка 5: Визуальный редактор
         self._create_visual_editor_tab()
 
+        # Вкладка 6: Внешние ссылки (бывший 2-й этап)
+        self._create_external_links_tab()
+
         # === Прогресс ===
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -845,6 +848,438 @@ class SEOClusterDialog(QDialog):
             f"Ошибок: {failed}"
         )
         QMessageBox.information(self, "Visual Linker", msg)
+
+    def _create_external_links_tab(self):
+        """
+        Вкладка "Внешние ссылки" - вставка произвольного HTML/ссылок.
+        Использует алгоритм LinkInserter из seo_cluster_linker.
+        """
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+
+        # === Поле ввода HTML/ссылок ===
+        input_group = QGroupBox("HTML-ссылки для вставки")
+        input_layout = QVBoxLayout(input_group)
+
+        self.external_anchor_input = QPlainTextEdit()
+        self.external_anchor_input.setPlaceholderText(
+            'Вставьте готовые <a href="...">Anchor</a> или произвольный HTML, по одному на строке.\n\n'
+            'Примеры:\n'
+            '<a href="https://example.com/page/">Buy cheap pills online</a>\n'
+            '<a href="https://another-site.com/">Order now with discount</a>\n'
+            '<p>Custom HTML block with <a href="...">link inside</a></p>'
+        )
+        self.external_anchor_input.setMinimumHeight(150)
+        input_layout.addWidget(self.external_anchor_input)
+
+        # Кнопка загрузки из файла
+        load_btn_layout = QHBoxLayout()
+        self.external_load_file_btn = QPushButton("📂 Загрузить из файла")
+        self.external_load_file_btn.clicked.connect(self._on_external_load_file)
+        load_btn_layout.addWidget(self.external_load_file_btn)
+        load_btn_layout.addStretch()
+        input_layout.addLayout(load_btn_layout)
+
+        layout.addWidget(input_group)
+
+        # === Режим вставки ===
+        mode_group = QGroupBox("Режим вставки")
+        mode_layout = QVBoxLayout(mode_group)
+
+        self.external_html_mode_cb = QCheckBox("Разрешить произвольный HTML (не только <a>)")
+        self.external_html_mode_cb.setChecked(False)
+        mode_layout.addWidget(self.external_html_mode_cb)
+
+        mode_info = QLabel(
+            "<span style='color:#32aaff;'><b>ВЫКЛ</b></span> — вставляет анкор <b>внутрь</b> текста (как кластерная перелинковка)<br>"
+            "<span style='color:#fca311;'><b>ВКЛ</b></span> — вставляет HTML-блок <b>после</b> текстового элемента"
+        )
+        mode_info.setWordWrap(True)
+        mode_info.setStyleSheet("padding: 8px; background: #2a2d32; border-radius: 4px;")
+        mode_layout.addWidget(mode_info)
+
+        layout.addWidget(mode_group)
+
+        # === Опции ===
+        options_group = QGroupBox("Опции вставки")
+        options_layout = QVBoxLayout(options_group)
+
+        # Количество ссылок
+        links_row = QHBoxLayout()
+        links_row.addWidget(QLabel("Ссылок на страницу:"))
+
+        self.external_min_links_spin = QSpinBox()
+        self.external_min_links_spin.setRange(1, 20)
+        self.external_min_links_spin.setValue(1)
+        links_row.addWidget(QLabel("от"))
+        links_row.addWidget(self.external_min_links_spin)
+
+        self.external_max_links_spin = QSpinBox()
+        self.external_max_links_spin.setRange(1, 20)
+        self.external_max_links_spin.setValue(3)
+        links_row.addWidget(QLabel("до"))
+        links_row.addWidget(self.external_max_links_spin)
+
+        links_row.addStretch()
+        options_layout.addLayout(links_row)
+
+        # Синхронизация min/max
+        def sync_min_max():
+            if self.external_max_links_spin.value() < self.external_min_links_spin.value():
+                self.external_max_links_spin.setValue(self.external_min_links_spin.value())
+        self.external_min_links_spin.valueChanged.connect(sync_min_max)
+        self.external_max_links_spin.valueChanged.connect(sync_min_max)
+
+        # Мин. длина текста
+        len_row = QHBoxLayout()
+        len_row.addWidget(QLabel("Мин. длина текстового блока:"))
+        self.external_min_len_spin = QSpinBox()
+        self.external_min_len_spin.setRange(10, 500)
+        self.external_min_len_spin.setValue(50)
+        len_row.addWidget(self.external_min_len_spin)
+        len_row.addWidget(QLabel("символов"))
+        len_row.addStretch()
+        options_layout.addLayout(len_row)
+
+        # Чекбоксы
+        self.external_sequential_cb = QCheckBox("Вставлять по порядку (иначе — рандом)")
+        options_layout.addWidget(self.external_sequential_cb)
+
+        self.external_cycle_cb = QCheckBox("Повторять ссылки по кругу, если страниц больше чем ссылок")
+        self.external_cycle_cb.setChecked(True)
+        options_layout.addWidget(self.external_cycle_cb)
+
+        self.external_fallback_cb = QCheckBox("Фоллбек-вставка, если нет подходящих блоков")
+        self.external_fallback_cb.setChecked(True)
+        options_layout.addWidget(self.external_fallback_cb)
+
+        layout.addWidget(options_group)
+
+        # === Кнопки действий ===
+        btn_layout = QHBoxLayout()
+
+        self.external_analyze_btn = QPushButton("📊 Анализ страниц")
+        self.external_analyze_btn.clicked.connect(self._on_external_analyze)
+        btn_layout.addWidget(self.external_analyze_btn)
+
+        self.external_generate_btn = QPushButton("🚀 Вставить внешние ссылки")
+        self.external_generate_btn.setStyleSheet(
+            "background: #2d8d46; border: 1px solid #3ca55a; font-weight: bold; padding: 10px 20px;"
+        )
+        self.external_generate_btn.clicked.connect(self._on_external_generate)
+        btn_layout.addWidget(self.external_generate_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # === Лог ===
+        self.external_log = QTextEdit()
+        self.external_log.setReadOnly(True)
+        self.external_log.setMaximumHeight(200)
+        layout.addWidget(QLabel("Лог:"))
+        layout.addWidget(self.external_log)
+
+        layout.addStretch()
+        self.tabs.addTab(widget, "🔗 Внешние ссылки")
+
+        # Внутренние переменные для этой вкладки
+        self._external_pages = []
+        self._external_anchors = []
+        self._external_anchor_index = 0
+
+    def _on_external_load_file(self):
+        """Загрузка HTML-ссылок из файла."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл с HTML-ссылками", "", "Text Files (*.txt);;All Files (*)"
+        )
+        if file_path:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                self.external_anchor_input.setPlainText(content)
+                self.external_log.append(f"✅ Загружено из: {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать файл:\n{e}")
+
+    def _on_external_analyze(self):
+        """Анализ страниц для внешних ссылок."""
+        self._external_pages = []
+        self.external_log.clear()
+
+        if not os.path.isdir(self.base_dir):
+            self.external_log.append(f"❌ Директория не найдена: {self.base_dir}")
+            return
+
+        # Собираем все HTML файлы
+        for root, dirs, files in os.walk(self.base_dir):
+            for file in files:
+                if file.endswith('.html'):
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, self.base_dir)
+                    self._external_pages.append({
+                        'full_path': full_path,
+                        'rel_path': rel_path
+                    })
+                    self.external_log.append(f"📄 {rel_path}")
+
+        self.external_log.append(f"\n✅ Найдено страниц: {len(self._external_pages)}")
+
+        # Парсим ссылки
+        self._sync_external_anchors()
+        self.external_log.append(f"🔗 Загружено ссылок/HTML: {len(self._external_anchors)}")
+
+    def _sync_external_anchors(self):
+        """Синхронизация списка ссылок из поля ввода."""
+        text = self.external_anchor_input.toPlainText()
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        self._external_anchors = lines
+        self._external_anchor_index = 0
+
+    def _get_next_external_anchor(self):
+        """Получает следующий анкор/HTML для вставки."""
+        if not self._external_anchors:
+            return None
+
+        if not self.external_sequential_cb.isChecked():
+            # Рандомный выбор
+            return random.choice(self._external_anchors)
+
+        # Последовательный выбор
+        if self._external_anchor_index >= len(self._external_anchors):
+            if self.external_cycle_cb.isChecked():
+                self._external_anchor_index = 0
+            else:
+                return None
+
+        anchor = self._external_anchors[self._external_anchor_index]
+        self._external_anchor_index += 1
+        return anchor
+
+    def _on_external_generate(self):
+        """Вставка внешних ссылок используя алгоритм LinkInserter."""
+        # Синхронизируем ссылки
+        self._sync_external_anchors()
+
+        if not self._external_pages:
+            QMessageBox.warning(self, "Ошибка", "Сначала выполните 'Анализ страниц'!")
+            return
+
+        if not self._external_anchors:
+            QMessageBox.warning(self, "Ошибка", "Добавьте HTML-ссылки для вставки!")
+            return
+
+        # Подтверждение
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f"Вставить ссылки в {len(self._external_pages)} страниц?\n\n"
+            f"Доступно ссылок: {len(self._external_anchors)}\n"
+            f"Ссылок на страницу: {self.external_min_links_spin.value()}-{self.external_max_links_spin.value()}\n\n"
+            "Рекомендуется сделать резервную копию.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.external_log.append("\n" + "="*50)
+        self.external_log.append("🚀 Начинаю вставку внешних ссылок...")
+
+        min_links = self.external_min_links_spin.value()
+        max_links = self.external_max_links_spin.value()
+        min_text_len = self.external_min_len_spin.value()
+        html_mode = self.external_html_mode_cb.isChecked()
+        fallback_on = self.external_fallback_cb.isChecked()
+
+        total_inserted = 0
+        total_failed = 0
+
+        # Создаём LinkInserter с нужными параметрами
+        inserter = LinkInserter(min_text_length=min_text_len)
+
+        for page_info in self._external_pages:
+            file_path = page_info['full_path']
+            rel_path = page_info['rel_path']
+
+            # Определяем сколько ссылок вставить на эту страницу
+            num_links = random.randint(min_links, max_links)
+
+            # Собираем ссылки для этой страницы
+            page_links = []
+            for _ in range(num_links):
+                anchor_html = self._get_next_external_anchor()
+                if not anchor_html:
+                    break
+
+                # Создаём фейковые Page и Link объекты для LinkInserter
+                src_page = Page(
+                    url=f"file://{file_path}",
+                    domain="local",
+                    file_path=file_path,
+                    title=rel_path,
+                    topic="external"
+                )
+
+                # Для внешних ссылок target не важен, важен только anchor
+                tgt_page = Page(
+                    url="https://external/",
+                    domain="external",
+                    file_path="",
+                    title=""
+                )
+
+                link = Link(
+                    source=src_page,
+                    target=tgt_page,
+                    anchor=anchor_html,  # Здесь полный HTML
+                    link_type='external'
+                )
+                page_links.append(link)
+
+            if not page_links:
+                continue
+
+            # Вставляем ссылки
+            if html_mode:
+                # Режим HTML-блока — вставка после элемента
+                stats = self._insert_external_html_blocks(file_path, page_links, min_text_len, fallback_on)
+            else:
+                # Режим анкора внутрь текста — используем LinkInserter
+                stats = inserter.insert_links(page_links)
+
+            inserted = stats.get('success', 0)
+            failed = stats.get('failed', 0)
+
+            if inserted > 0:
+                self.external_log.append(
+                    f"<span style='color:#3ca55a;'>✅ {rel_path}: вставлено {inserted} ссылок</span>"
+                )
+                total_inserted += inserted
+            else:
+                self.external_log.append(
+                    f"<span style='color:#e8ab02;'>⚠️ {rel_path}: не удалось вставить</span>"
+                )
+
+            total_failed += failed
+
+        self.external_log.append("="*50)
+        self.external_log.append(
+            f"<b>Готово! Вставлено: {total_inserted}, Ошибок: {total_failed}</b>"
+        )
+
+        QMessageBox.information(
+            self, "Завершено",
+            f"Вставка внешних ссылок завершена!\n\n"
+            f"Успешно: {total_inserted}\n"
+            f"Ошибок: {total_failed}"
+        )
+
+    def _insert_external_html_blocks(self, file_path: str, links: List[Link],
+                                      min_text_len: int, fallback_on: bool) -> dict:
+        """
+        Вставляет HTML-блоки ПОСЛЕ текстовых элементов (режим произвольного HTML).
+        """
+        import chardet
+        from lxml import html as lxml_html
+        from lxml import etree
+
+        stats = {'success': 0, 'failed': 0, 'skipped': 0}
+
+        try:
+            with open(file_path, 'rb') as f:
+                raw = f.read()
+            encoding = chardet.detect(raw).get('encoding') or 'utf-8'
+            html_content = raw.decode(encoding, errors='replace')
+
+            doc = lxml_html.fromstring(html_content)
+
+            # Ищем подходящие блоки для вставки после них
+            candidates = doc.xpath('//p | //div | //section | //article')
+            valid_candidates = []
+
+            for el in candidates:
+                text = el.text_content().strip()
+                if len(text) < min_text_len:
+                    continue
+                # Проверка на запрещённые области
+                if self._is_forbidden_element(el):
+                    continue
+                valid_candidates.append(el)
+
+            if not valid_candidates and not fallback_on:
+                stats['skipped'] = len(links)
+                return stats
+
+            for link in links:
+                anchor_html = link.anchor
+
+                if valid_candidates:
+                    # Выбираем случайный элемент
+                    target_el = random.choice(valid_candidates)
+
+                    try:
+                        # Создаём новый элемент из HTML
+                        new_el = lxml_html.fragment_fromstring(
+                            f"<div class='external-link-block'>{anchor_html}</div>",
+                            create_parent=False
+                        )
+                        # Вставляем после целевого элемента
+                        target_el.addnext(new_el)
+                        stats['success'] += 1
+                    except Exception as e:
+                        stats['failed'] += 1
+
+                elif fallback_on:
+                    # Fallback — вставляем в конец body
+                    body = doc.xpath('//body')
+                    if body:
+                        try:
+                            new_el = lxml_html.fragment_fromstring(
+                                f"<div class='external-link-block'>{anchor_html}</div>",
+                                create_parent=False
+                            )
+                            body[0].append(new_el)
+                            stats['success'] += 1
+                        except:
+                            stats['failed'] += 1
+                    else:
+                        stats['failed'] += 1
+                else:
+                    stats['skipped'] += 1
+
+            # Сохраняем файл
+            if stats['success'] > 0:
+                result = etree.tostring(doc, encoding='unicode', method='html')
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(result)
+
+        except Exception as e:
+            stats['failed'] = len(links)
+
+        return stats
+
+    def _is_forbidden_element(self, el) -> bool:
+        """Проверяет, находится ли элемент в запрещённой области."""
+        forbidden_tags = {'nav', 'footer', 'header', 'aside', 'menu', 'form'}
+        forbidden_classes = {'sidebar', 'menu', 'footer', 'header', 'nav', 'comment', 'widget'}
+
+        # Проверяем сам элемент и его родителей
+        current = el
+        while current is not None:
+            tag = getattr(current, 'tag', '')
+            if tag in forbidden_tags:
+                return True
+
+            classes = current.get('class', '').lower().split()
+            el_id = current.get('id', '').lower()
+
+            for fc in forbidden_classes:
+                if fc in ' '.join(classes) or fc in el_id:
+                    return True
+
+            current = current.getparent()
+
+        return False
 
     def _apply_styles(self):
         """Применяет стили из styles.py."""
